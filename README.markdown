@@ -30,4 +30,9 @@ To retrieve object you can do:
     erlang_couchdb:get_value(<<"rows">>, Obj).
     erlang_couchdb:get_value([<<"rows">>,<<"value">>], Obj).
 
+To create an object and set a number of attributes:
+
+    erlang_couchdb:fold([erlang_couchdb:set_value(K, V) || {K,V} <- L], 
+                        erlang_couchdb:empty())
+
 Patches are welcome. For the time being this module should be considered alpha. Support is limited but feel free to contact me via email and submit patches. If you use this module please let me know.
