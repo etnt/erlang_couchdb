@@ -24,4 +24,10 @@ A quick demo:
     erlang_couchdb:create_view({"localhost", 5984}, "iplaywow", "characters", <<"javascript">>, [{<<"realm">>, <<"function(doc) { if (doc.type == 'character')  emit(doc.realm_full, null) }">>}]).
     erlang_couchdb:invoke_view({"localhost", 5984}, "iplaywow", "characters", "realm", [{"key", "\"Medivh-US\""}]).
 
+To retrieve object you can do:
+
+    {json, Obj} = erlang_couchdb:invoke_view(...).
+    erlang_couchdb:get_value(<<"rows">>, Obj).
+    erlang_couchdb:get_value([<<"rows">>,<<"value">>], Obj).
+
 Patches are welcome. For the time being this module should be considered alpha. Support is limited but feel free to contact me via email and submit patches. If you use this module please let me know.
