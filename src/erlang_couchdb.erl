@@ -241,6 +241,10 @@ retrieve_document({Server, ServerPort}, Database, DocID, Attributes) when is_lis
 %% or create a new one with a specified id. If this function is used to
 %% update a document the attributes list must contain a '_rev' key/value
 %% pair tuple.
+update_document({Server, ServerPort}, Database, DocID, {struct,_} = Obj) when is_list(Server), is_integer(ServerPort) ->
+    Url = build_uri(Database, DocID),
+    JSON = list_to_binary(mochijson2:encode(Obj)),
+    raw_request("PUT", Server, ServerPort, Url, JSON);
 update_document({Server, ServerPort}, Database, DocID, Attributes) when is_list(Server), is_integer(ServerPort) ->
     Url = build_uri(Database, DocID),
     JSON = list_to_binary(mochijson2:encode({Attributes})),
