@@ -61,7 +61,7 @@
 -version("Version: 0.2.3").
 
 -export([server_info/1]).
--export([create_database/2, database_info/2, delete_database/2]).
+-export([create_database/2, database_info/2, retrieve_all_dbs/1, delete_database/2]).
 -export([create_document/3, create_document/4, create_documents/3]).
 -export([retrieve_document/3, retrieve_document/4, document_revision/3]).
 -export([update_document/4, delete_document/4, delete_documents/3]).
@@ -182,6 +182,13 @@ server_info({Server, ServerPort}) when is_list(Server), is_integer(ServerPort) -
     Url = build_uri(),
     raw_request("GET", Server, ServerPort, Url, []).
 
+%% @edoc Retieve all the databases
+retrieve_all_dbs({Server, ServerPort}) when is_list(Server), is_integer(ServerPort) ->
+    raw_request("GET", Server, ServerPort, "/_all_dbs",[]). 
+
+			
+
+
 %% @doc Create a new document. This function will create a document with a
 %% list of attributes and leaves it up to the server to create an id for it.
 %% The attributes should be a list of binary key/value tuples.
@@ -191,7 +198,7 @@ create_document({Server, ServerPort}, Database, {struct, _} = Obj) when is_list(
     raw_request("POST", Server, ServerPort, Url, JSON);
 create_document({Server, ServerPort}, Database, Attributes) when is_list(Server), is_integer(ServerPort) ->
     Url = build_uri(Database),
-    JSON = list_to_binary(mochijson2:encode({Attributes})),
+    JSON = list_to_binary(mochijson2:encode({struct, Attributes})),
     raw_request("POST", Server, ServerPort, Url, JSON).
 
 %% @doc Create a new document with a specific document ID. This is just an
@@ -220,7 +227,7 @@ document_revision({Server, ServerPort}, Database, DocID) when is_list(Server), i
     Url = build_uri(Database, DocID, []),
     JSON = raw_request("GET", Server, ServerPort, Url, []),
     case JSON of
-        {json,{struct, Props}} ->
+        {json, {struct, Props}} ->
             {ok, proplists:get_value(<<"_id">>, Props), proplists:get_value(<<"_rev">>, Props)};
         _ -> {error, JSON}
     end.
@@ -247,7 +254,7 @@ update_document({Server, ServerPort}, Database, DocID, {struct,_} = Obj) when is
     raw_request("PUT", Server, ServerPort, Url, JSON);
 update_document({Server, ServerPort}, Database, DocID, Attributes) when is_list(Server), is_integer(ServerPort) ->
     Url = build_uri(Database, DocID),
-    JSON = list_to_binary(mochijson2:encode({Attributes})),
+    JSON = list_to_binary(mochijson2:encode({struct, Attributes})),
     raw_request("PUT", Server, ServerPort, Url, JSON).
 
 %% @doc Deletes a given document by id and revision.
@@ -278,18 +285,18 @@ create_view({Server, ServerPort}, Database, ViewClass, Language, Views, Attribut
     Design = [
         {<<"_id">>, list_to_binary("_design/" ++ ViewClass)},
         {<<"language">>, Language},
-        {<<"views">>, {[
+        {<<"views">>, {struct, [
             begin
                 case View of
                     {Name, Map} -> 
-                        {Name, {[{<<"map">>, Map}]}};
+                        {Name, {struct, [{<<"map">>, Map}]}};
                     {Name, Map, Reduce} ->
-                        {Name, {[{<<"map">>, Map}, {<<"reduce">>, Reduce}]}}
+                        {Name, {struct, [{<<"map">>, Map}, {<<"reduce">>, Reduce}]}}
                 end
             end || View <- Views
         ]}}
     | Attributes],
-    JSON = list_to_binary(mochijson2:encode({Design})),
+    JSON = list_to_binary(mochijson2:encode({struct, Design})),
     Url = build_uri(Database, "_design/" ++ ViewClass),
     raw_request("PUT", Server, ServerPort, Url, JSON).
 
@@ -303,15 +310,17 @@ parse_view({json, {struct, [{<<"error">>, _Code}, {_, _Reason}]}}) ->
     {0, 0, []};
 parse_view({json, Structure}) ->
     {struct, Properties} = Structure,
-    {TotalRows, Offset, Data} = case Properties of
-        [{_, A}, {_, B}, {_, C}] -> {A, B, C};
-        [{_, A}, {_, B}] -> {A, B, []};
-        _ -> {0, 0, []}
-    end,
+    TotalRows = proplists:get_value(<<"total_rows">>, Properties, 0),
+    Offset = proplists:get_value(<<"offset">>, Properties, 0),
+    Data = proplists:get_value(<<"rows">>, Properties, []),
     Ids = [begin
         {struct, Bits} = Rec,
-        [{<<"id">>, Id} | _] = Bits,
-        Id
+        Id = proplists:get_value(<<"id">>, Bits),
+        case proplists:get_value(<<"value">>, Bits, []) of
+            [] -> Id;
+            {struct, RowValues} -> {Id, RowValues};
+            _ -> Id
+        end
     end || Rec <- Data],
     {TotalRows, Offset, Ids};
 parse_view(_Other) -> {0, 0, []}.
