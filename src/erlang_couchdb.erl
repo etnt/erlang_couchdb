@@ -22,6 +22,9 @@
 %% OTHER DEALINGS IN THE SOFTWARE.
 %% 
 %% Change Log:
+%% * v2009-01-23 ngerakines
+%%   - Importing functionality from etnt_. GitHub merge didn't work.
+%%   - Started adding etap tests.
 %% * v0.2.3 2008-10-26: ngerakines
 %%   - Added ability to delete databases.
 %%   - Added function to fetch Document by ID and return it's Document
@@ -140,7 +143,7 @@ build_uri(Database, Request, Attributes) ->
 
 %% @private
 view_uri(Database, ViewName, ViewId, Args) ->
-    lists:concat(["/", Database, "/_view/", ViewName, "/", ViewId, build_querystring(Args)]).
+    lists:concat(["/", Database, "/_design/", ViewName, "/_view/", ViewId, build_querystring(Args)]).
 
 %% @private
 build_querystring([]) -> [];
@@ -162,33 +165,59 @@ decode_json(Body) ->
 %% ---
 %% Public Functions / API
 
+%% @spec create_database(DBServer::server_address(), Database::string()) ->  ok | {error, Reason::any()}
+%%
+%% @type server_address() = {Host::string(), ServerPort::integer()}
+%%
 %% @doc Create a new database.
 create_database({Server, ServerPort}, Database) when is_list(Server), is_integer(ServerPort) ->
     Url = build_uri(Database),
-    raw_request("PUT", Server, ServerPort, Url, []).
+    case raw_request("PUT", Server, ServerPort, Url, []) of
+        {json, {struct, [{<<"ok">>, true}]}} -> ok;
+        Other -> {error, Other}
+    end.
 
-%% @doc Create a new database.
+%% @spec delete_database(DBServer::server_address(), Database::string()) ->  ok | {error, Reason::any()}
+%%
+%% @doc Delete a database.
 delete_database({Server, ServerPort}, Database) when is_list(Server), is_integer(ServerPort) ->
     Url = build_uri(Database),
-    raw_request("DELETE", Server, ServerPort, Url, []).
+    case raw_request("DELETE", Server, ServerPort, Url, []) of
+        {json, {struct, [{<<"ok">>, true}]}} -> ok;
+        Other -> {error, Other}
+    end.
 
+%% @spec database_info(DBServer::server_address(), Database::string()) ->  {ok, Info::any()} | {error, Reason::any()}
+%%
 %% @doc Get info about a database.
 database_info({Server, ServerPort}, Database) when is_list(Server), is_integer(ServerPort) ->
     Url = build_uri(Database),
-    raw_request("GET", Server, ServerPort, Url, []).
+    case raw_request("GET", Server, ServerPort, Url, []) of
+        {json, {struct, Info}} -> {ok, Info};
+        Other -> {error, Other}
+    end.
 
+%% @spec server_info(DBServer::server_address()) ->  {ok, Welcome::any()} | {other, Other::any()}
+%%
 %% @doc Get info about a server.
 server_info({Server, ServerPort}) when is_list(Server), is_integer(ServerPort) ->
     Url = build_uri(),
-    raw_request("GET", Server, ServerPort, Url, []).
+    case raw_request("GET", Server, ServerPort, Url, []) of
+        {json, {struct, Welcome}} -> {ok, Welcome};
+        Other -> {other, Other}
+    end.
 
-%% @edoc Retieve all the databases
+%% @spec retrieve_all_dbs(DBServer::server_address()) ->  {ok, Database::any()} | {other, Other::any()}
+%%
+%% @doc Retieve all the databases
 retrieve_all_dbs({Server, ServerPort}) when is_list(Server), is_integer(ServerPort) ->
-    raw_request("GET", Server, ServerPort, "/_all_dbs",[]). 
+    case raw_request("GET", Server, ServerPort, "/_all_dbs",[]) of
+        {json, Database} -> {ok, Database};
+        Other -> {error, Other}
+    end.
 
-			
-
-
+%% @spec create_document(DBServer::server_address(), Database::string(), Attributes::any()) ->  {json, Response::any()} | {raw, Other::any()}
+%%
 %% @doc Create a new document. This function will create a document with a
 %% list of attributes and leaves it up to the server to create an id for it.
 %% The attributes should be a list of binary key/value tuples.
@@ -201,6 +230,8 @@ create_document({Server, ServerPort}, Database, Attributes) when is_list(Server)
     JSON = list_to_binary(mochijson2:encode({struct, Attributes})),
     raw_request("POST", Server, ServerPort, Url, JSON).
 
+%% @spec create_document(DBServer::server_address(), Database::string(), DocumentID::string(), Attributes::any()) ->  {json, Response::any()} | {raw, Other::any()}
+%%
 %% @doc Create a new document with a specific document ID. This is just an
 %% accessor function to update_document/4 when the intent is to create a 
 %% new document.
@@ -342,81 +373,70 @@ load_view({Server, ServerPort}, Database, ViewName, File) ->
         [{<<"language">>, <<"javascript">>}, {<<"views">>, mochijson2:decode(Data2)}]
     ).
 
-
 %% @doc Get the specified (set of) attribute(s)
 get_value(Path, Struct) when is_list(Path) ->
-	get_val(Path, Struct);
+    get_val(Path, Struct);
 get_value(Key, Struct) when is_binary(Key) ->
-	{struct, L} = Struct,
-	proplists:get_value(Key, L).
+    {struct, L} = Struct,
+    proplists:get_value(Key, L).
 
 get_val([Key], Struct) ->
-	get_value(Key, Struct);
+    get_value(Key, Struct);
 get_val([Key | T], Struct) ->
-	case get_value(Key, Struct) of
-            List when is_list(List) ->
-                [get_val(T, X) || X <- List];
-            NewStruct when is_tuple(NewStruct) ->
-                get_val(T, NewStruct)
-        end.
+    case get_value(Key, Struct) of
+        List when is_list(List) -> [get_val(T, X) || X <- List];
+        NewStruct when is_tuple(NewStruct) -> get_val(T, NewStruct)
+    end.
 
 %% @doc Set the specified (set of) attribute(s)
 set_value(Path, Value, Struct) when is_list(Path) ->
-	[H | T] = lists:reverse(Path),
-	set_val(T, Struct, {struct, [{H, Value}]});
+    [H | T] = lists:reverse(Path),
+    set_val(T, Struct, {struct, [{H, Value}]});
 set_value(Key, Value, Struct) when is_binary(Key) ->
-	extend(Struct, {struct, [{Key, Value}]}).
+    extend(Struct, {struct, [{Key, Value}]}).
 
 set_val([], Struct, Result) ->
-	extend(Struct, Result);
+    extend(Struct, Result);
 set_val([Key | T], Struct, Result) ->
-	set_val(T, Struct, {struct, [{Key, Result}]}).
+    set_val(T, Struct, {struct, [{Key, Result}]}).
 
 %% @doc To be used with the fold function
 set_value(Key, Value) when is_binary(Key) ->
     fun(Struct) -> set_value(Key, vals(Value), Struct) end.
-            
-vals(B) when is_binary(B)  -> B;
+
+vals(B) when is_binary(B) -> B;
 vals(I) when is_integer(I) -> I;
-vals(L) when is_list(L)    -> list_to_binary(L);
-vals(A) when is_atom(A)    -> vals(atom_to_list(A)).
-    
+vals(L) when is_list(L) -> list_to_binary(L);
+vals(A) when is_atom(A) -> vals(atom_to_list(A)).
 
 %% @doc Apply a list of set-functions on an initial object.
 fold([H|T], Struct) -> fold(T, H(Struct));
-fold([],    Struct) -> Struct.
-    
+fold([], Struct) -> Struct.
+
 %% @doc Return an empty object
-empty() ->
- {struct, []}.
+empty() -> {struct, []}.
 
 %% @doc Extend a json obj with one or more json obj (add new leaves and modify the existing ones).
-extend(S1, []) ->
-	S1;
-
+extend(S1, []) -> S1;
 extend(S1, [S|T]) ->
-	NewS = extend(S1, S),
-	extend(NewS, T);
-
+    NewS = extend(S1, S),
+    extend(NewS, T);
 extend(S1, S2) ->
-	{struct, L1} = S1,
-	{struct, L2} = S2,
-	ext(L1, L2, []).
+    {struct, L1} = S1,
+    {struct, L2} = S2,
+    ext(L1, L2, []).
 
 ext(L1, [], Result) ->
-	{struct, lists:append(Result,L1)};
-
+    {struct, lists:append(Result,L1)};
 ext(L1, [{K, {struct, ChildL2}} | T], Result) ->
-	case proplists:get_value(K, L1) of
-		{struct, ChildL1} ->
-			NewL1 = proplists:delete(K, L1),
-			ext(NewL1, T, [{K, extend({struct, ChildL1}, {struct, ChildL2})} | Result]);
-		_ ->
-			NewL1 = proplists:delete(K, L1),
-			 ext(NewL1, T, [{K, {struct, ChildL2}} | Result])
-	end;
-
+    case proplists:get_value(K, L1) of
+        {struct, ChildL1} ->
+            NewL1 = proplists:delete(K, L1),
+            ext(NewL1, T, [{K, extend({struct, ChildL1}, {struct, ChildL2})} | Result]);
+        _ ->
+        NewL1 = proplists:delete(K, L1),
+        ext(NewL1, T, [{K, {struct, ChildL2}} | Result])
+    end;
 ext(L1, [{K, V} | T], Result) ->
-	NewL1 = proplists:delete(K, L1),
- 	ext(NewL1, T, [{K,V} | Result]).
-
+    NewL1 = proplists:delete(K, L1),
+    ext(NewL1, T, [{K,V} | Result]).
